@@ -1,4 +1,4 @@
-# HKtex — Heat-kernel fields for quadrilateral meshing
+# HKquad — Heat-kernel fields for quadrilateral meshing
 
 在**独立输入三角曲面**上逐模型优化可移动热核，构造 4-RoSy 方向场和尺寸场，再通过 MIQ 参数化与 QEx 提取四边形网格。参考 quad 只提供方向监督；每个新模型都要优化自己的 kernel。
 
