@@ -1,0 +1,164 @@
+# 日常入口：python train.py（默认 quad 配置）；命令行可临时覆盖这些设置。
+run:
+  shape: dente                         # datasets 下的模型目录名
+  gpu: "0"                           # 使用哪张 GPU
+  dataset_root: datasets/bimdf_cross_mesh
+  stage2: true                       # true: 训练后生成 quad；false: 只训练场
+  memory_fraction: 0.35              # PyTorch 显存分配比例上限
+
+name: "hktex2quad-field"
+tag: "${filename:${data.mesh_path}}"
+exp_root_dir: "outputs"
+seed: 0
+
+# Use an independently supplied triangle mesh; see README.md.
+data_type: data.mesh
+data:
+  mesh_path: ${run.dataset_root}/${run.shape}/triangle.obj
+
+trainer_type: trainers.quad-field
+trainer:
+  model_type: modules.heat-kernel-cross-field-knn
+
+  tracer_type: modules.gpu-geodesic-tracer
+  tracer:
+    n_debug_traces: 0
+    debug: false
+
+  eigen_albo_type: modules.eigen-albo-interpolation-knn
+  eigen_albo:
+    k_eig: 128
+    mesh_path: ${data.mesh_path}
+    use_precomputed: true
+    distance_weighting: gaussian_0.05
+    mass_type: ${trainer.model.mass_type}
+    local_frames: principal_curvatures
+    precompute_anisotropies: [1, 5, 15, 30, 60, 100, 200]
+    precompute_angles_every_deg: 30
+    knn_embedding_dim: 64
+    faiss:
+      use_float16: false
+      distance_impl: bmm
+      build_db_norm: true
+      compile_distances: true
+    gather:
+      select_impl: bilinear4
+      compile_select: true
+      gather_impl: stream_vertices
+      compile_gather: true
+    weighting:
+      kernel: gaussian
+      gaussian_std: 0.05
+      normalize: false
+      compile_kernel: true
+    heat:
+      compile_heat: true
+    parse_weighting_from_str: true
+
+  model:
+    n_sources: 512                   # kernel 总数；所有参数都保留
+    # A slightly wider support avoids weak/cancelled regions on irregular
+    # meshes while still retaining local control of the cross field.
+    diff_time: 0.1
+    mass_type: one
+    init_min_threshold: 0.3
+    range_enforcement_type: pgd
+    init_kernel_edge_type: high_skewed
+    rosy_degree: 4
+    init_target_size: 0.02
+    min_target_size: 0.0001
+    max_target_size: 10000.0
+    transport_mode: gpu-local
+    allow_untransported: false
+    knn_outer_k: 50
+    knn_inner_k: 30
+
+  # These counts bound memory; every batch is evaluated on the GPU.
+  face_sample_count: 4096
+  edge_sample_count: 4096
+  boundary_sample_count: 1024
+  forward_batch_size: 4096
+
+  # h 固定为统一目标尺寸；s、epsilon 保留各 kernel 的原始初始化值。
+  # rho、a、alpha 继续优化；不删除参数，也不重设支撑形状。
+  fixed_target_size: true
+  fixed_kernel_sharpness: true
+  fixed_kernel_threshold: true
+  fixed_cross_amplitude: false
+  fixed_kernel_anisotropy: false
+  fixed_support_angle: false
+  target_quad_count: 10000
+  base_target_size: null
+  curvature_size_scale: 4.0
+  guidance_min_weight: 0.05
+  initialize_from_geometry: true
+  # geometry is unchanged. quad replaces the alignment target, not the model.
+  supervision: geometry
+  quad_supervision_path: null
+  quad_min_confidence: 0.1
+  use_connection_reference: true
+  reference_eigenvector_count: 4
+  reference_candidate_count: 48
+  reference_seed: 0
+
+  # Favor a globally coherent connection-aware field.  Principal-curvature
+  # directions are only soft guidance because they are noisy near umbilics.
+  direction_smoothness_weight: 2.0
+  guidance_alignment_weight: 5.0
+  boundary_alignment_weight: 2.0
+  size_smoothness_weight: 0.1
+  size_target_weight: 1.0
+  field_strength_weight: 0.2
+  # A smooth cross is not necessarily the gradient of a seamless UV map.
+  # These terms couple direction and scale along shared primal edges, suppress
+  # severe local rotations, and concentrate unavoidable low-quality regions.
+  integrability_weight: 0.5
+  direction_tail_weight: 0.5
+  coherence_weight: 0.25
+  coverage_weight: 0.1
+  maximum_direction_jump_degrees: 10.0
+  minimum_coherence: 0.5
+  minimum_coverage: 0.25
+  gradient_clip_norm: 10.0
+  singularity_report_frequency: 250
+
+  # Headless paper-style figures are written after dense field export, even
+  # when optimisation.py is called with --no-render.
+  save_field_visualization: true
+  visualization_dense_glyph_count: 700
+  visualization_kernel_glyph_count: 192
+  visualization_dpi: 240
+  visualization_elevation: 24.0
+  visualization_azimuth: -58.0
+
+  optimizers:
+    - name: Adam
+      args: {}
+      params:
+        model._cross_coefficients: {lr: 0.01}
+        model._target_log_sizes: {lr: 0.005}
+        model._angles: {lr: 0.002}
+        model._anisotropies: {lr: 0.001}
+        model._thresholds: {lr: 0.001}
+        model._sharpnesses: {lr: 0.001}
+      scheduler:
+        name: StepLR
+        args: {gamma: 0.5, step_size: 1000}
+    - name: GeodesicOpt
+      args:
+        lr: 0.001
+        momentum: 0.9
+        tracer: tracer
+      params:
+        model._kernel_locations:
+          face_ids: model._kernel_face_ids
+      scheduler:
+        name: StepLR
+        args: {gamma: 0.5, step_size: 1000}
+
+
+optim:
+  iters: 3000
+  save_logs: true
+  save_model: true
+  save_model_name: hktex2quad_field.pt

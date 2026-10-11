@@ -1,0 +1,19 @@
+# Linux x86_64. Run from this project root: conda env create -f environment.yml
+name: hktex
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - numpy=2.2.6
+  - cmake>=3.24,<4
+  - ninja
+  - pytorch::faiss-gpu=1.13.1=py3.11_h1b31e9c_0_cuda12.6
+  - pip:
+      - --extra-index-url https://download.pytorch.org/whl/cu128
+      - torch==2.10.0+cu128
+      - triton==3.6.0
+      - digeo==0.0.4
+      - -r requirements.txt

@@ -1,0 +1,158 @@
+# 日常入口：python train.py（默认 quad 配置）；命令行可临时覆盖这些设置。
+run:
+  shape: dente                         # datasets 下的模型目录名
+  gpu: "0"                           # 使用哪张 GPU
+  dataset_root: datasets/bimdf_cross_mesh
+  stage2: true                       # true: 训练后生成 quad；false: 只训练场
+  memory_fraction: 0.35              # PyTorch 显存分配比例上限
+
+# Quad supervision mapped from a separate reference to the supplied triangle mesh.
+# All kernels are retained; global Top-K activation is not implemented yet.
+name: hktex2quad-quad
+tag: ${filename:${data.mesh_path}}
+exp_root_dir: outputs
+seed: 0
+data_type: data.mesh
+data:
+  mesh_path: ${run.dataset_root}/${run.shape}/triangle.obj
+  preserve_topology: true
+trainer_type: trainers.quad-field
+trainer:
+  model_type: modules.heat-kernel-cross-field-knn
+  tracer_type: modules.gpu-geodesic-tracer
+  tracer:
+    n_debug_traces: 0
+    debug: false
+  eigen_albo_type: modules.eigen-albo-interpolation-knn
+  eigen_albo:
+    k_eig: 64
+    mesh_path: ${data.mesh_path}
+    use_precomputed: true
+    distance_weighting: gaussian_0.05
+    mass_type: ${trainer.model.mass_type}
+    local_frames: principal_curvatures
+    precompute_anisotropies:
+    - 1
+    - 5
+    - 15
+    - 30
+    precompute_angles_every_deg: 60
+    knn_embedding_dim: 32
+    faiss:
+      use_float16: false
+      distance_impl: bmm
+      build_db_norm: true
+      compile_distances: false
+    gather:
+      select_impl: bilinear4
+      compile_select: false
+      gather_impl: stream_vertices
+      compile_gather: false
+    weighting:
+      kernel: gaussian
+      gaussian_std: 0.05
+      normalize: false
+      compile_kernel: false
+    heat:
+      compile_heat: false
+    parse_weighting_from_str: true
+    precomputed_name: cross_mesh_k64_a1_5_15_30_deg60
+  model:
+    n_sources: 128                   # kernel 总数；所有参数都保留
+    diff_time: 0.1
+    mass_type: one
+    init_min_threshold: 0.3
+    range_enforcement_type: pgd
+    init_kernel_edge_type: high_skewed
+    rosy_degree: 4
+    init_target_size: 0.02
+    min_target_size: 0.0001
+    max_target_size: 10000.0
+    transport_mode: gpu-local
+    allow_untransported: false
+    knn_outer_k: 50
+    knn_inner_k: 30
+  face_sample_count: 1024
+  edge_sample_count: 1024
+  boundary_sample_count: 1024
+  forward_batch_size: 1024
+  # h 固定为统一目标尺寸；s、epsilon 保留各 kernel 的原始初始化值。
+  # rho、a、alpha 继续优化；不删除参数，也不重设支撑形状。
+  fixed_target_size: true
+  fixed_kernel_sharpness: true
+  fixed_kernel_threshold: true
+  fixed_cross_amplitude: false
+  fixed_kernel_anisotropy: false
+  fixed_support_angle: false
+  target_quad_count: 3000             # 输出密度目标，实际 quad 数可能不同
+  base_target_size: null
+  curvature_size_scale: 0.0
+  guidance_min_weight: 0.05
+  initialize_from_geometry: true
+  supervision: quad
+  quad_supervision_path: ${run.dataset_root}/${run.shape}/quad_targets.npz
+  quad_min_confidence: 0.1
+  use_connection_reference: true
+  reference_eigenvector_count: 4
+  reference_candidate_count: 48
+  reference_seed: 0
+  direction_smoothness_weight: 2.0
+  guidance_alignment_weight: 5.0
+  boundary_alignment_weight: 2.0
+  size_smoothness_weight: 0.1
+  size_target_weight: 1.0
+  field_strength_weight: 0.2
+  integrability_weight: 0.5
+  direction_tail_weight: 0.5
+  coherence_weight: 0.25
+  coverage_weight: 0.1
+  maximum_direction_jump_degrees: 10.0
+  minimum_coherence: 0.5
+  minimum_coverage: 0.25
+  gradient_clip_norm: 10.0
+  singularity_report_frequency: 500
+  save_field_visualization: true
+  visualization_dense_glyph_count: 700
+  visualization_kernel_glyph_count: 192
+  visualization_dpi: 180
+  visualization_elevation: 24.0
+  visualization_azimuth: -58.0
+  optimizers:
+  - name: Adam
+    args: {}
+    params:
+      model._cross_coefficients:
+        lr: 0.01
+      model._target_log_sizes:
+        lr: 0.005
+      model._angles:
+        lr: 0.002
+      model._anisotropies:
+        lr: 0.001
+      model._thresholds:
+        lr: 0.001
+      model._sharpnesses:
+        lr: 0.001
+    scheduler:
+      name: StepLR
+      args:
+        gamma: 0.5
+        step_size: 1000
+  - name: GeodesicOpt
+    args:
+      lr: 0.001
+      momentum: 0.9
+      tracer: tracer
+    params:
+      model._kernel_locations:
+        face_ids: model._kernel_face_ids
+    scheduler:
+      name: StepLR
+      args:
+        gamma: 0.5
+        step_size: 1000
+optim:
+  iters: 1500                        # 训练迭代次数
+  save_logs: true
+  save_model: true
+  save_model_name: hktex2quad_field.pt

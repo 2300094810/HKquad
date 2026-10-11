@@ -1,0 +1,14 @@
+# CPU dependencies; environment.yml also installs CUDA PyTorch, GPU FAISS, Triton and digeo.
+numpy==2.2.6
+scipy==1.17.1
+omegaconf==2.3.0
+trimesh==4.11.2
+matplotlib==3.10.8
+libigl==2.6.1
+jaxtyping==0.3.9
+tqdm==4.67.3
+termcolor==3.3.0
+PyYAML==6.0.3
+potpourri3d==1.3
+robust_laplacian==1.0.0
+rtree==1.4.1
